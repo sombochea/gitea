@@ -73,6 +73,8 @@ require (
 	github.com/mgechev/revive v1.0.2
 	github.com/microcosm-cc/bluemonday v1.0.3-0.20191119130333-0a75d7616912
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/msteinert/pam v0.0.0-20151204160544-02ccfbfaf0cc
 	github.com/nfnt/resize v0.0.0-20160724205520-891127d8d1b5
 	github.com/niklasfasching/go-org v0.1.9
