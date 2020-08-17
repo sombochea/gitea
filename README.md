@@ -1,5 +1,3 @@
-[简体中文](README_ZH.md)
-
 <h1> <img src="https://raw.githubusercontent.com/go-gitea/gitea/master/public/img/gitea-192.png" alt="logo" width="30" height="30"> Gitea - Git with a cup of tea</h1>
 
 [![Build Status](https://drone.gitea.io/api/badges/go-gitea/gitea/status.svg?ref=refs/heads/master)](https://drone.gitea.io/go-gitea/gitea)
