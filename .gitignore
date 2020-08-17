@@ -96,4 +96,3 @@ prime/
 
 # Make evidence files
 /.make_evidence
-package-lock.json
