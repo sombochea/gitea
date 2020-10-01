@@ -32,6 +32,7 @@ import (
 	"code.gitea.io/gitea/modules/markup"
 	"code.gitea.io/gitea/modules/options"
 	"code.gitea.io/gitea/modules/setting"
+	"code.gitea.io/gitea/modules/storage"
 	api "code.gitea.io/gitea/modules/structs"
 	"code.gitea.io/gitea/modules/timeutil"
 	"code.gitea.io/gitea/modules/util"
@@ -142,6 +143,47 @@ const (
 	RepositoryBeingMigrated                         // repository is migrating
 )
 
+// TrustModelType defines the types of trust model for this repository
+type TrustModelType int
+
+// kinds of TrustModel
+const (
+	DefaultTrustModel TrustModelType = iota // default trust model
+	CommitterTrustModel
+	CollaboratorTrustModel
+	CollaboratorCommitterTrustModel
+)
+
+// String converts a TrustModelType to a string
+func (t TrustModelType) String() string {
+	switch t {
+	case DefaultTrustModel:
+		return "default"
+	case CommitterTrustModel:
+		return "committer"
+	case CollaboratorTrustModel:
+		return "collaborator"
+	case CollaboratorCommitterTrustModel:
+		return "collaboratorcommitter"
+	}
+	return "default"
+}
+
+// ToTrustModel converts a string to a TrustModelType
+func ToTrustModel(model string) TrustModelType {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "default":
+		return DefaultTrustModel
+	case "collaborator":
+		return CollaboratorTrustModel
+	case "committer":
+		return CommitterTrustModel
+	case "collaboratorcommitter":
+		return CollaboratorCommitterTrustModel
+	}
+	return DefaultTrustModel
+}
+
 // Repository represents a git repository.
 type Repository struct {
 	ID                  int64 `xorm:"pk autoincr"`
@@ -197,6 +239,8 @@ type Repository struct {
 	CloseIssuesViaCommitInAnyBranch bool               `xorm:"NOT NULL DEFAULT false"`
 	Topics                          []string           `xorm:"TEXT JSON"`
 
+	TrustModel TrustModelType
+
 	// Avatar: ID(10-20)-md5(32) - must fit into 64 symbols
 	Avatar string `xorm:"VARCHAR(64)"`
 
@@ -234,7 +278,7 @@ func (repo *Repository) IsBeingCreated() bool {
 func (repo *Repository) AfterLoad() {
 	// FIXME: use models migration to solve all at once.
 	if len(repo.DefaultBranch) == 0 {
-		repo.DefaultBranch = "master"
+		repo.DefaultBranch = setting.Repository.DefaultBranch
 	}
 
 	repo.NumOpenIssues = repo.NumIssues - repo.NumClosedIssues
@@ -424,20 +468,17 @@ func (repo *Repository) getUnits(e Engine) (err error) {
 }
 
 // CheckUnitUser check whether user could visit the unit of this repository
-func (repo *Repository) CheckUnitUser(userID int64, isAdmin bool, unitType UnitType) bool {
-	return repo.checkUnitUser(x, userID, isAdmin, unitType)
+func (repo *Repository) CheckUnitUser(user *User, unitType UnitType) bool {
+	return repo.checkUnitUser(x, user, unitType)
 }
 
-func (repo *Repository) checkUnitUser(e Engine, userID int64, isAdmin bool, unitType UnitType) bool {
-	if isAdmin {
+func (repo *Repository) checkUnitUser(e Engine, user *User, unitType UnitType) bool {
+	if user.IsAdmin {
 		return true
-	}
-	user, err := getUserByID(e, userID)
-	if err != nil {
-		return false
 	}
 	perm, err := getUserRepoPermission(e, repo, user)
 	if err != nil {
+		log.Error("getUserRepoPermission(): %v", err)
 		return false
 	}
 
@@ -1007,7 +1048,7 @@ func (repo *Repository) CloneLink() (cl *CloneLink) {
 }
 
 // CheckCreateRepository check if could created a repository
-func CheckCreateRepository(doer, u *User, name string) error {
+func CheckCreateRepository(doer, u *User, name string, overwriteOrAdopt bool) error {
 	if !doer.CanCreateRepo() {
 		return ErrReachLimitOfRepo{u.MaxRepoCreation}
 	}
@@ -1021,6 +1062,10 @@ func CheckCreateRepository(doer, u *User, name string) error {
 		return fmt.Errorf("IsRepositoryExist: %v", err)
 	} else if has {
 		return ErrRepoAlreadyExist{u.Name, name}
+	}
+
+	if !overwriteOrAdopt && com.IsExist(RepoPath(u.Name, name)) {
+		return ErrRepoFilesAlreadyExist{u.Name, name}
 	}
 	return nil
 }
@@ -1038,8 +1083,10 @@ type CreateRepoOptions struct {
 	DefaultBranch  string
 	IsPrivate      bool
 	IsMirror       bool
+	IsTemplate     bool
 	AutoInit       bool
 	Status         RepositoryStatus
+	TrustModel     TrustModelType
 }
 
 // GetRepoInitFile returns repository init files
@@ -1074,11 +1121,15 @@ var (
 
 // IsUsableRepoName returns true when repository is usable
 func IsUsableRepoName(name string) error {
+	if alphaDashDotPattern.MatchString(name) {
+		// Note: usually this error is normally caught up earlier in the UI
+		return ErrNameCharsNotAllowed{Name: name}
+	}
 	return isUsableName(reservedRepoNames, reservedRepoPatterns, name)
 }
 
 // CreateRepository creates a repository for the user/organization.
-func CreateRepository(ctx DBContext, doer, u *User, repo *Repository) (err error) {
+func CreateRepository(ctx DBContext, doer, u *User, repo *Repository, overwriteOrAdopt bool) (err error) {
 	if err = IsUsableRepoName(repo.Name); err != nil {
 		return err
 	}
@@ -1088,6 +1139,15 @@ func CreateRepository(ctx DBContext, doer, u *User, repo *Repository) (err error
 		return fmt.Errorf("IsRepositoryExist: %v", err)
 	} else if has {
 		return ErrRepoAlreadyExist{u.Name, repo.Name}
+	}
+
+	repoPath := RepoPath(u.Name, repo.Name)
+	if !overwriteOrAdopt && com.IsExist(repoPath) {
+		log.Error("Files already exist in %s and we are not going to adopt or delete.", repoPath)
+		return ErrRepoFilesAlreadyExist{
+			Uname: u.Name,
+			Name:  repo.Name,
+		}
 	}
 
 	if _, err = ctx.e.Insert(repo); err != nil {
@@ -1595,7 +1655,7 @@ func DeleteRepository(doer *User, uid, repoID int64) error {
 	}
 	releaseAttachments := make([]string, 0, len(attachments))
 	for i := 0; i < len(attachments); i++ {
-		releaseAttachments = append(releaseAttachments, attachments[i].LocalPath())
+		releaseAttachments = append(releaseAttachments, attachments[i].RelativePath())
 	}
 
 	if _, err = sess.Exec("UPDATE `user` SET num_stars=num_stars-1 WHERE id IN (SELECT `uid` FROM `star` WHERE repo_id = ?)", repo.ID); err != nil {
@@ -1688,8 +1748,7 @@ func DeleteRepository(doer *User, uid, repoID int64) error {
 			continue
 		}
 
-		oidPath := filepath.Join(setting.LFS.ContentPath, v.Oid[0:2], v.Oid[2:4], v.Oid[4:len(v.Oid)])
-		removeAllWithNotice(sess, "Delete orphaned LFS file", oidPath)
+		removeStorageWithNotice(sess, storage.LFS, "Delete orphaned LFS file", v.RelativePath())
 	}
 
 	if _, err := sess.Delete(&LFSMetaObject{RepositoryID: repoID}); err != nil {
@@ -1720,12 +1779,12 @@ func DeleteRepository(doer *User, uid, repoID int64) error {
 
 	// Remove issue attachment files.
 	for i := range attachmentPaths {
-		removeAllWithNotice(x, "Delete issue attachment", attachmentPaths[i])
+		RemoveStorageWithNotice(storage.Attachments, "Delete issue attachment", attachmentPaths[i])
 	}
 
 	// Remove release attachment files.
 	for i := range releaseAttachments {
-		removeAllWithNotice(x, "Delete release attachment", releaseAttachments[i])
+		RemoveStorageWithNotice(storage.Attachments, "Delete release attachment", releaseAttachments[i])
 	}
 
 	if len(repo.Avatar) > 0 {
@@ -1812,6 +1871,10 @@ func GetUserRepositories(opts *SearchRepoOptions) ([]*Repository, int64, error) 
 	cond = cond.And(builder.Eq{"owner_id": opts.Actor.ID})
 	if !opts.Private {
 		cond = cond.And(builder.Eq{"is_private": false})
+	}
+
+	if opts.LowerNames != nil && len(opts.LowerNames) > 0 {
+		cond = cond.And(builder.In("lower_name", opts.LowerNames))
 	}
 
 	sess := x.NewSession()
@@ -2253,6 +2316,11 @@ func (repo *Repository) relAvatarLink(e Engine) string {
 	return setting.AppSubURL + "/repo-avatars/" + repo.Avatar
 }
 
+// AvatarLink returns a link to the repository's avatar.
+func (repo *Repository) AvatarLink() string {
+	return repo.avatarLink(x)
+}
+
 // avatarLink returns user avatar absolute link.
 func (repo *Repository) avatarLink(e Engine) string {
 	link := repo.relAvatarLink(e)
@@ -2378,6 +2446,18 @@ func updateRepositoryCols(e Engine, repo *Repository, cols ...string) error {
 // UpdateRepositoryCols updates repository's columns
 func UpdateRepositoryCols(repo *Repository, cols ...string) error {
 	return updateRepositoryCols(x, repo, cols...)
+}
+
+// GetTrustModel will get the TrustModel for the repo or the default trust model
+func (repo *Repository) GetTrustModel() TrustModelType {
+	trustModel := repo.TrustModel
+	if trustModel == DefaultTrustModel {
+		trustModel = ToTrustModel(setting.Repository.Signing.DefaultTrustModel)
+		if trustModel == DefaultTrustModel {
+			return CollaboratorTrustModel
+		}
+	}
+	return trustModel
 }
 
 // DoctorUserStarNum recalculate Stars number for all user
