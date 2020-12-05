@@ -71,7 +71,7 @@
 
 			<div class="ui dropdown jump item poping up" tabindex="-1" data-content="{{.i18n.Tr "user_profile_and_more"}}" data-variation="tiny inverted">
 				<span class="text">
-					<img class="ui tiny avatar image" src="{{.SignedUser.RelAvatarLink}}">
+					{{avatar .SignedUser 24 "tiny"}}
 					<span class="sr-only">{{.i18n.Tr "user_profile_and_more"}}</span>
 					<span class="mobile-only">{{.SignedUser.Name}}</span>
 					<span class="fitted not-mobile" tabindex="-1">{{svg "octicon-triangle-down"}}</span>
@@ -204,7 +204,7 @@
 
 			<div class="ui dropdown jump item poping up" tabindex="-1" data-content="{{.i18n.Tr "user_profile_and_more"}}" data-variation="tiny inverted">
 				<span class="text">
-					<img class="ui tiny avatar image" src="{{.SignedUser.RelAvatarLink}}">
+					{{avatar .SignedUser 24 "tiny"}}
 					<span class="sr-only">{{.i18n.Tr "user_profile_and_more"}}</span>
 					<span class="mobile-only">{{.SignedUser.Name}}</span>
 					<span class="fitted not-mobile" tabindex="-1">{{svg "octicon-triangle-down"}}</span>
