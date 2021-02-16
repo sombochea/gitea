@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"code.gitea.io/gitea/modules/context"
-	"code.gitea.io/gitea/modules/middlewares"
 	"code.gitea.io/gitea/modules/setting"
+	"code.gitea.io/gitea/modules/web/middleware"
 
 	"gitea.com/go-chi/binding"
 )
@@ -69,7 +69,7 @@ type InstallForm struct {
 // Validate validates the fields
 func (f *InstallForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 //    _____   ____ _________________ ___
@@ -92,32 +92,43 @@ type RegisterForm struct {
 // Validate validates the fields
 func (f *RegisterForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
-// IsEmailDomainWhitelisted validates that the email address
-// provided by the user matches what has been configured .
-// If the domain whitelist from the config is empty, it marks the
-// email as whitelisted
-func (f RegisterForm) IsEmailDomainWhitelisted() bool {
-	if len(setting.Service.EmailDomainWhitelist) == 0 {
-		return true
+// IsEmailDomainListed checks whether the domain of an email address
+// matches a list of domains
+func IsEmailDomainListed(list []string, email string) bool {
+	if len(list) == 0 {
+		return false
 	}
 
-	n := strings.LastIndex(f.Email, "@")
+	n := strings.LastIndex(email, "@")
 	if n <= 0 {
 		return false
 	}
 
-	domain := strings.ToLower(f.Email[n+1:])
+	domain := strings.ToLower(email[n+1:])
 
-	for _, v := range setting.Service.EmailDomainWhitelist {
+	for _, v := range list {
 		if strings.ToLower(v) == domain {
 			return true
 		}
 	}
 
 	return false
+}
+
+// IsEmailDomainAllowed validates that the email address
+// provided by the user matches what has been configured .
+// The email is marked as allowed if it matches any of the
+// domains in the whitelist or if it doesn't match any of
+// domains in the blocklist, if any such list is not empty.
+func (f RegisterForm) IsEmailDomainAllowed() bool {
+	if len(setting.Service.EmailDomainWhitelist) == 0 {
+		return !IsEmailDomainListed(setting.Service.EmailDomainBlocklist, f.Email)
+	}
+
+	return IsEmailDomainListed(setting.Service.EmailDomainWhitelist, f.Email)
 }
 
 // MustChangePasswordForm form for updating your password after account creation
@@ -130,7 +141,7 @@ type MustChangePasswordForm struct {
 // Validate validates the fields
 func (f *MustChangePasswordForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // SignInForm form for signing in with user/password
@@ -144,7 +155,7 @@ type SignInForm struct {
 // Validate validates the fields
 func (f *SignInForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // AuthorizationForm form for authorizing oauth2 clients
@@ -164,7 +175,7 @@ type AuthorizationForm struct {
 // Validate validates the fields
 func (f *AuthorizationForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // GrantApplicationForm form for authorizing oauth2 clients
@@ -179,7 +190,7 @@ type GrantApplicationForm struct {
 // Validate validates the fields
 func (f *GrantApplicationForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // AccessTokenForm for issuing access tokens from authorization codes or refresh tokens
@@ -198,7 +209,7 @@ type AccessTokenForm struct {
 // Validate validates the fields
 func (f *AccessTokenForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 //   __________________________________________.___ _______    ________  _________
@@ -223,7 +234,7 @@ type UpdateProfileForm struct {
 // Validate validates the fields
 func (f *UpdateProfileForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // Avatar types
@@ -243,7 +254,7 @@ type AvatarForm struct {
 // Validate validates the fields
 func (f *AvatarForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // AddEmailForm form for adding new email
@@ -254,7 +265,7 @@ type AddEmailForm struct {
 // Validate validates the fields
 func (f *AddEmailForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // UpdateThemeForm form for updating a users' theme
@@ -265,7 +276,7 @@ type UpdateThemeForm struct {
 // Validate validates the field
 func (f *UpdateThemeForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // IsThemeExists checks if the theme is a theme available in the config.
@@ -292,7 +303,7 @@ type ChangePasswordForm struct {
 // Validate validates the fields
 func (f *ChangePasswordForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // AddOpenIDForm is for changing openid uri
@@ -303,7 +314,7 @@ type AddOpenIDForm struct {
 // Validate validates the fields
 func (f *AddOpenIDForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // AddKeyForm form for adding SSH/GPG key
@@ -317,7 +328,7 @@ type AddKeyForm struct {
 // Validate validates the fields
 func (f *AddKeyForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // NewAccessTokenForm form for creating access token
@@ -328,7 +339,7 @@ type NewAccessTokenForm struct {
 // Validate validates the fields
 func (f *NewAccessTokenForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // EditOAuth2ApplicationForm form for editing oauth2 applications
@@ -340,7 +351,7 @@ type EditOAuth2ApplicationForm struct {
 // Validate validates the fields
 func (f *EditOAuth2ApplicationForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // TwoFactorAuthForm for logging in with 2FA token.
@@ -351,7 +362,7 @@ type TwoFactorAuthForm struct {
 // Validate validates the fields
 func (f *TwoFactorAuthForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // TwoFactorScratchAuthForm for logging in with 2FA scratch token.
@@ -362,7 +373,7 @@ type TwoFactorScratchAuthForm struct {
 // Validate validates the fields
 func (f *TwoFactorScratchAuthForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // U2FRegistrationForm for reserving an U2F name
@@ -373,7 +384,7 @@ type U2FRegistrationForm struct {
 // Validate validates the fields
 func (f *U2FRegistrationForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
 // U2FDeleteForm for deleting U2F keys
@@ -384,5 +395,5 @@ type U2FDeleteForm struct {
 // Validate validates the fields
 func (f *U2FDeleteForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetContext(req)
-	return middlewares.Validate(errs, ctx.Data, f, ctx.Locale)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
