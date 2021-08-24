@@ -6,6 +6,7 @@ package migrations
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,8 @@ import (
 
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/migrations/base"
+	"code.gitea.io/gitea/modules/proxy"
+	"code.gitea.io/gitea/modules/setting"
 	"code.gitea.io/gitea/modules/structs"
 
 	"github.com/gogs/go-gogs-client"
@@ -95,9 +98,10 @@ func NewGogsDownloader(ctx context.Context, baseURL, userName, password, token, 
 		downloader.userName = token
 	} else {
 		downloader.transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: setting.Migrations.SkipTLSVerify},
 			Proxy: func(req *http.Request) (*url.URL, error) {
 				req.SetBasicAuth(userName, password)
-				return nil, nil
+				return proxy.Proxy()(req)
 			},
 		}
 
@@ -224,10 +228,9 @@ func (g *GogsDownloader) getIssues(page int, state string) ([]*base.Issue, bool,
 
 // GetComments returns comments according issueNumber
 func (g *GogsDownloader) GetComments(opts base.GetCommentOptions) ([]*base.Comment, bool, error) {
-	var issueNumber = opts.IssueNumber
 	var allComments = make([]*base.Comment, 0, 100)
 
-	comments, err := g.client.ListIssueComments(g.repoOwner, g.repoName, issueNumber)
+	comments, err := g.client.ListIssueComments(g.repoOwner, g.repoName, opts.Context.ForeignID())
 	if err != nil {
 		return nil, false, fmt.Errorf("error while listing repos: %v", err)
 	}
@@ -236,7 +239,7 @@ func (g *GogsDownloader) GetComments(opts base.GetCommentOptions) ([]*base.Comme
 			continue
 		}
 		allComments = append(allComments, &base.Comment{
-			IssueIndex:  issueNumber,
+			IssueIndex:  opts.Context.LocalID(),
 			PosterID:    comment.Poster.ID,
 			PosterName:  comment.Poster.Login,
 			PosterEmail: comment.Poster.Email,
@@ -300,6 +303,7 @@ func convertGogsIssue(issue *gogs.Issue) *base.Issue {
 		Updated:     issue.Updated,
 		Labels:      labels,
 		Closed:      closed,
+		Context:     base.BasicIssueContext(issue.Index),
 	}
 }
 
