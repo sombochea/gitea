@@ -16,17 +16,13 @@ import (
 
 	"code.gitea.io/gitea/modules/setting"
 
-	// Needed for the MySQL driver
-	_ "github.com/go-sql-driver/mysql"
 	"xorm.io/xorm"
 	"xorm.io/xorm/names"
 	"xorm.io/xorm/schemas"
 
-	// Needed for the Postgresql driver
-	_ "github.com/lib/pq"
-
-	// Needed for the MSSQL driver
-	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/denisenkom/go-mssqldb" // Needed for the MSSQL driver
+	_ "github.com/go-sql-driver/mysql"   // Needed for the MySQL driver
+	_ "github.com/lib/pq"                // Needed for the Postgresql driver
 )
 
 var (
@@ -59,6 +55,7 @@ type Engine interface {
 	Asc(colNames ...string) *xorm.Session
 	Desc(colNames ...string) *xorm.Session
 	Limit(limit int, start ...int) *xorm.Session
+	NoAutoTime() *xorm.Session
 	SumInt(bean interface{}, columnName string) (res int64, err error)
 	Sync2(...interface{}) error
 	Select(string) *xorm.Session
@@ -124,7 +121,8 @@ func NewEngine() (*xorm.Engine, error) {
 	return engine, nil
 }
 
-func syncTables() error {
+//SyncAllTables sync the schemas of all tables, is required by unit test code
+func SyncAllTables() error {
 	return x.StoreEngine("InnoDB").Sync2(tables...)
 }
 
@@ -152,6 +150,15 @@ func InitEngine(ctx context.Context) (err error) {
 	return nil
 }
 
+// SetEngine is used by unit test code
+func SetEngine(eng *xorm.Engine) {
+	x = eng
+	DefaultContext = &Context{
+		Context: context.Background(),
+		e:       x,
+	}
+}
+
 // InitEngineWithMigration initializes a new xorm.Engine
 // This function must never call .Sync2() if the provided migration function fails.
 // When called from the "doctor" command, the migration function is a version check
@@ -176,7 +183,7 @@ func InitEngineWithMigration(ctx context.Context, migrateFunc func(*xorm.Engine)
 		return fmt.Errorf("migrate: %v", err)
 	}
 
-	if err = syncTables(); err != nil {
+	if err = SyncAllTables(); err != nil {
 		return fmt.Errorf("sync database struct error: %v", err)
 	}
 
