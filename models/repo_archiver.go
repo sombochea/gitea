@@ -6,19 +6,18 @@ package models
 
 import (
 	"code.gitea.io/gitea/models/db"
-
 	repo_model "code.gitea.io/gitea/models/repo"
 )
 
 // LoadArchiverRepo loads repository
-func LoadArchiverRepo(archiver *repo_model.RepoArchiver) (*Repository, error) {
-	var repo Repository
+func LoadArchiverRepo(archiver *repo_model.RepoArchiver) (*repo_model.Repository, error) {
+	var repo repo_model.Repository
 	has, err := db.GetEngine(db.DefaultContext).ID(archiver.RepoID).Get(&repo)
 	if err != nil {
 		return nil, err
 	}
 	if !has {
-		return nil, ErrRepoNotExist{
+		return nil, repo_model.ErrRepoNotExist{
 			ID: archiver.RepoID,
 		}
 	}
