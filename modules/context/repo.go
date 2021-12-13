@@ -443,10 +443,10 @@ func RepoAssignment(ctx *Context) (cancel context.CancelFunc) {
 	repo, err := repo_model.GetRepositoryByName(owner.ID, repoName)
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
-			redirectRepoID, err := models.LookupRepoRedirect(owner.ID, repoName)
+			redirectRepoID, err := repo_model.LookupRedirect(owner.ID, repoName)
 			if err == nil {
 				RedirectToRepo(ctx, redirectRepoID)
-			} else if models.IsErrRepoRedirectNotExist(err) {
+			} else if repo_model.IsErrRedirectNotExist(err) {
 				if ctx.FormString("go-get") == "1" {
 					EarlyResponseForGoGetMeta(ctx)
 					return
@@ -499,10 +499,24 @@ func RepoAssignment(ctx *Context) (cancel context.CancelFunc) {
 	ctx.Data["CanWriteIssues"] = ctx.Repo.CanWrite(unit_model.TypeIssues)
 	ctx.Data["CanWritePulls"] = ctx.Repo.CanWrite(unit_model.TypePullRequests)
 
-	if ctx.Data["CanSignedUserFork"], err = models.CanUserForkRepo(ctx.User, ctx.Repo.Repository); err != nil {
-		ctx.ServerError("CanSignedUserFork", err)
+	canSignedUserFork, err := models.CanUserForkRepo(ctx.User, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("CanUserForkRepo", err)
 		return
 	}
+	ctx.Data["CanSignedUserFork"] = canSignedUserFork
+
+	userAndOrgForks, err := models.GetForksByUserAndOrgs(ctx.User, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("GetForksByUserAndOrgs", err)
+		return
+	}
+	ctx.Data["UserAndOrgForks"] = userAndOrgForks
+
+	// canSignedUserFork is true if the current user doesn't have a fork of this repo yet or
+	// if he owns an org that doesn't have a fork of this repo yet
+	// If multiple forks are available or if the user can fork to another account, but there is already a fork: open selection dialog
+	ctx.Data["ShowForkModal"] = len(userAndOrgForks) > 1 || (canSignedUserFork && len(userAndOrgForks) > 0)
 
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
 	ctx.Data["ExposeAnonSSH"] = setting.SSH.ExposeAnonymous
@@ -512,8 +526,8 @@ func RepoAssignment(ctx *Context) (cancel context.CancelFunc) {
 	ctx.Data["WikiCloneLink"] = repo.WikiCloneLink()
 
 	if ctx.IsSigned {
-		ctx.Data["IsWatchingRepo"] = models.IsWatching(ctx.User.ID, repo.ID)
-		ctx.Data["IsStaringRepo"] = models.IsStaring(ctx.User.ID, repo.ID)
+		ctx.Data["IsWatchingRepo"] = repo_model.IsWatching(ctx.User.ID, repo.ID)
+		ctx.Data["IsStaringRepo"] = repo_model.IsStaring(ctx.User.ID, repo.ID)
 	}
 
 	if repo.IsFork {
@@ -613,7 +627,7 @@ func RepoAssignment(ctx *Context) (cancel context.CancelFunc) {
 
 	// People who have push access or have forked repository can propose a new pull request.
 	canPush := ctx.Repo.CanWrite(unit_model.TypeCode) ||
-		(ctx.IsSigned && models.HasForkedRepo(ctx.User.ID, ctx.Repo.Repository.ID))
+		(ctx.IsSigned && repo_model.HasForkedRepo(ctx.User.ID, ctx.Repo.Repository.ID))
 	canCompare := false
 
 	// Pull request is allowed if this is a fork repository
