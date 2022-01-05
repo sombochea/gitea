@@ -189,7 +189,6 @@ func RegisterRoutes(m *web.Route) {
 	ignSignInAndCsrf := context.Toggle(&context.ToggleOptions{DisableCSRF: true})
 	reqSignOut := context.Toggle(&context.ToggleOptions{SignOutRequired: true})
 
-	//bindIgnErr := binding.BindIgnErr
 	bindIgnErr := web.Bind
 	validation.AddBindingRules()
 
@@ -1064,8 +1063,6 @@ func RegisterRoutes(m *web.Route) {
 				m.GetOptions("/objects/pack/pack-{file:[0-9a-f]{40}}.pack", repo.GetPackFile)
 				m.GetOptions("/objects/pack/pack-{file:[0-9a-f]{40}}.idx", repo.GetIdxFile)
 			}, ignSignInAndCsrf)
-
-			m.Head("/tasks/trigger", repo.TriggerTask)
 		})
 	})
 	// ***** END: Repository *****
