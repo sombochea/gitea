@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"sync"
@@ -66,11 +67,9 @@ func GetManager() *Manager {
 // Most processes will not need to use the cancel function but there will be cases whereby you want to cancel the process but not immediately remove it from the
 // process table.
 func (pm *Manager) AddContext(parent context.Context, description string) (ctx context.Context, cancel context.CancelFunc, finished FinishedFunc) {
-	parentPID := GetParentPID(parent)
-
 	ctx, cancel = context.WithCancel(parent)
 
-	pid, finished := pm.Add(parentPID, description, cancel)
+	ctx, pid, finished := pm.Add(ctx, description, cancel)
 
 	return &Context{
 		Context: ctx,
@@ -79,7 +78,7 @@ func (pm *Manager) AddContext(parent context.Context, description string) (ctx c
 }
 
 // AddContextTimeout creates a new context and add it as a process. Once the process is finished, finished must be called
-// to remove the process from the process table. It should not be called until the process is finsihed but must always be called.
+// to remove the process from the process table. It should not be called until the process is finished but must always be called.
 //
 // cancel should be used to cancel the returned context, however it will not remove the process from the process table.
 // finished will cancel the returned context and remove it from the process table.
@@ -87,11 +86,9 @@ func (pm *Manager) AddContext(parent context.Context, description string) (ctx c
 // Most processes will not need to use the cancel function but there will be cases whereby you want to cancel the process but not immediately remove it from the
 // process table.
 func (pm *Manager) AddContextTimeout(parent context.Context, timeout time.Duration, description string) (ctx context.Context, cancel context.CancelFunc, finshed FinishedFunc) {
-	parentPID := GetParentPID(parent)
-
 	ctx, cancel = context.WithTimeout(parent, timeout)
 
-	pid, finshed := pm.Add(parentPID, description, cancel)
+	ctx, pid, finshed := pm.Add(ctx, description, cancel)
 
 	return &Context{
 		Context: ctx,
@@ -100,7 +97,9 @@ func (pm *Manager) AddContextTimeout(parent context.Context, timeout time.Durati
 }
 
 // Add create a new process
-func (pm *Manager) Add(parentPID IDType, description string, cancel context.CancelFunc) (IDType, FinishedFunc) {
+func (pm *Manager) Add(ctx context.Context, description string, cancel context.CancelFunc) (context.Context, IDType, FinishedFunc) {
+	parentPID := GetParentPID(ctx)
+
 	pm.mutex.Lock()
 	start, pid := pm.nextPID()
 
@@ -120,6 +119,7 @@ func (pm *Manager) Add(parentPID IDType, description string, cancel context.Canc
 	finished := func() {
 		cancel()
 		pm.remove(process)
+		pprof.SetGoroutineLabels(ctx)
 	}
 
 	if parent != nil {
@@ -128,7 +128,10 @@ func (pm *Manager) Add(parentPID IDType, description string, cancel context.Canc
 	pm.processes[pid] = process
 	pm.mutex.Unlock()
 
-	return pid, finished
+	pprofCtx := pprof.WithLabels(ctx, pprof.Labels("process-description", description, "ppid", string(parentPID), "pid", string(pid)))
+	pprof.SetGoroutineLabels(pprofCtx)
+
+	return pprofCtx, pid, finished
 }
 
 // nextPID will return the next available PID. pm.mutex should already be locked.
@@ -210,32 +213,32 @@ func (pm *Manager) Processes(onlyRoots bool) []*Process {
 
 // Exec a command and use the default timeout.
 func (pm *Manager) Exec(desc, cmdName string, args ...string) (string, string, error) {
-	return pm.ExecDir(-1, "", desc, cmdName, args...)
+	return pm.ExecDir(DefaultContext, -1, "", desc, cmdName, args...)
 }
 
 // ExecTimeout a command and use a specific timeout duration.
 func (pm *Manager) ExecTimeout(timeout time.Duration, desc, cmdName string, args ...string) (string, string, error) {
-	return pm.ExecDir(timeout, "", desc, cmdName, args...)
+	return pm.ExecDir(DefaultContext, timeout, "", desc, cmdName, args...)
 }
 
 // ExecDir a command and use the default timeout.
-func (pm *Manager) ExecDir(timeout time.Duration, dir, desc, cmdName string, args ...string) (string, string, error) {
-	return pm.ExecDirEnv(timeout, dir, desc, nil, cmdName, args...)
+func (pm *Manager) ExecDir(ctx context.Context, timeout time.Duration, dir, desc, cmdName string, args ...string) (string, string, error) {
+	return pm.ExecDirEnv(ctx, timeout, dir, desc, nil, cmdName, args...)
 }
 
 // ExecDirEnv runs a command in given path and environment variables, and waits for its completion
 // up to the given timeout (or DefaultTimeout if -1 is given).
 // Returns its complete stdout and stderr
 // outputs and an error, if any (including timeout)
-func (pm *Manager) ExecDirEnv(timeout time.Duration, dir, desc string, env []string, cmdName string, args ...string) (string, string, error) {
-	return pm.ExecDirEnvStdIn(timeout, dir, desc, env, nil, cmdName, args...)
+func (pm *Manager) ExecDirEnv(ctx context.Context, timeout time.Duration, dir, desc string, env []string, cmdName string, args ...string) (string, string, error) {
+	return pm.ExecDirEnvStdIn(ctx, timeout, dir, desc, env, nil, cmdName, args...)
 }
 
 // ExecDirEnvStdIn runs a command in given path and environment variables with provided stdIN, and waits for its completion
 // up to the given timeout (or DefaultTimeout if -1 is given).
 // Returns its complete stdout and stderr
 // outputs and an error, if any (including timeout)
-func (pm *Manager) ExecDirEnvStdIn(timeout time.Duration, dir, desc string, env []string, stdIn io.Reader, cmdName string, args ...string) (string, string, error) {
+func (pm *Manager) ExecDirEnvStdIn(ctx context.Context, timeout time.Duration, dir, desc string, env []string, stdIn io.Reader, cmdName string, args ...string) (string, string, error) {
 	if timeout == -1 {
 		timeout = 60 * time.Second
 	}
@@ -243,7 +246,7 @@ func (pm *Manager) ExecDirEnvStdIn(timeout time.Duration, dir, desc string, env 
 	stdOut := new(bytes.Buffer)
 	stdErr := new(bytes.Buffer)
 
-	ctx, _, finished := pm.AddContextTimeout(DefaultContext, timeout, desc)
+	ctx, _, finished := pm.AddContextTimeout(ctx, timeout, desc)
 	defer finished()
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
@@ -260,7 +263,6 @@ func (pm *Manager) ExecDirEnvStdIn(timeout time.Duration, dir, desc string, env 
 	}
 
 	err := cmd.Wait()
-
 	if err != nil {
 		err = &Error{
 			PID:         GetPID(ctx),

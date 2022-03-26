@@ -6,6 +6,7 @@ package org
 
 import (
 	"net/http"
+	"strings"
 
 	"code.gitea.io/gitea/models"
 	"code.gitea.io/gitea/models/db"
@@ -23,7 +24,14 @@ const (
 
 // Home show organization home page
 func Home(ctx *context.Context) {
-	ctx.SetParams(":org", ctx.Params(":username"))
+	uname := ctx.Params(":username")
+
+	if strings.HasSuffix(uname, ".keys") || strings.HasSuffix(uname, ".gpg") {
+		ctx.NotFound("", nil)
+		return
+	}
+
+	ctx.SetParams(":org", uname)
 	context.HandleOrgAssignment(ctx)
 	if ctx.Written() {
 		return
@@ -31,7 +39,7 @@ func Home(ctx *context.Context) {
 
 	org := ctx.Org.Organization
 
-	if !models.HasOrgOrUserVisible(org.AsUser(), ctx.User) {
+	if !models.HasOrgOrUserVisible(org.AsUser(), ctx.Doer) {
 		ctx.NotFound("HasOrgOrUserVisible", nil)
 		return
 	}
@@ -40,6 +48,7 @@ func Home(ctx *context.Context) {
 	ctx.Data["Title"] = org.DisplayName()
 	if len(org.Description) != 0 {
 		desc, err := markdown.RenderString(&markup.RenderContext{
+			Ctx:       ctx,
 			URLPrefix: ctx.Repo.RepoLink,
 			Metas:     map[string]string{"mode": "document"},
 			GitRepo:   ctx.Repo.GitRepo,
@@ -82,6 +91,9 @@ func Home(ctx *context.Context) {
 	keyword := ctx.FormTrim("q")
 	ctx.Data["Keyword"] = keyword
 
+	language := ctx.FormTrim("language")
+	ctx.Data["Language"] = language
+
 	page := ctx.FormInt("page")
 	if page <= 0 {
 		page = 1
@@ -101,7 +113,8 @@ func Home(ctx *context.Context) {
 		OwnerID:            org.ID,
 		OrderBy:            orderBy,
 		Private:            ctx.IsSigned,
-		Actor:              ctx.User,
+		Actor:              ctx.Doer,
+		Language:           language,
 		IncludeDescription: setting.UI.SearchRepoDescription,
 	})
 	if err != nil {
@@ -109,19 +122,19 @@ func Home(ctx *context.Context) {
 		return
 	}
 
-	var opts = &models.FindOrgMembersOpts{
+	opts := &models.FindOrgMembersOpts{
 		OrgID:       org.ID,
 		PublicOnly:  true,
 		ListOptions: db.ListOptions{Page: 1, PageSize: 25},
 	}
 
-	if ctx.User != nil {
-		isMember, err := org.IsOrgMember(ctx.User.ID)
+	if ctx.Doer != nil {
+		isMember, err := org.IsOrgMember(ctx.Doer.ID)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "IsOrgMember")
 			return
 		}
-		opts.PublicOnly = !isMember && !ctx.User.IsAdmin
+		opts.PublicOnly = !isMember && !ctx.Doer.IsAdmin
 	}
 
 	members, _, err := models.FindOrgMembers(opts)
@@ -147,6 +160,7 @@ func Home(ctx *context.Context) {
 
 	pager := context.NewPagination(int(count), setting.UI.User.RepoPagingNum, page, 5)
 	pager.SetDefaultParams(ctx)
+	pager.AddParam(ctx, "language", "Language")
 	ctx.Data["Page"] = pager
 
 	ctx.HTML(http.StatusOK, tplOrgHome)

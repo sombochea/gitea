@@ -103,7 +103,7 @@ func sudo() func(ctx *context.APIContext) {
 		}
 
 		if len(sudo) > 0 {
-			if ctx.IsSigned && ctx.User.IsAdmin {
+			if ctx.IsSigned && ctx.Doer.IsAdmin {
 				user, err := user_model.GetUserByName(sudo)
 				if err != nil {
 					if user_model.IsErrUserNotExist(err) {
@@ -113,8 +113,8 @@ func sudo() func(ctx *context.APIContext) {
 					}
 					return
 				}
-				log.Trace("Sudo from (%s) to: %s", ctx.User.Name, user.Name)
-				ctx.User = user
+				log.Trace("Sudo from (%s) to: %s", ctx.Doer.Name, user.Name)
+				ctx.Doer = user
 			} else {
 				ctx.JSON(http.StatusForbidden, map[string]string{
 					"message": "Only administrators allowed to sudo.",
@@ -136,8 +136,8 @@ func repoAssignment() func(ctx *context.APIContext) {
 		)
 
 		// Check if the user is the same as the repository owner.
-		if ctx.IsSigned && ctx.User.LowerName == strings.ToLower(userName) {
-			owner = ctx.User
+		if ctx.IsSigned && ctx.Doer.LowerName == strings.ToLower(userName) {
+			owner = ctx.Doer
 		} else {
 			owner, err = user_model.GetUserByName(userName)
 			if err != nil {
@@ -178,7 +178,7 @@ func repoAssignment() func(ctx *context.APIContext) {
 		repo.Owner = owner
 		ctx.Repo.Repository = repo
 
-		ctx.Repo.Permission, err = models.GetUserRepoPermission(repo, ctx.User)
+		ctx.Repo.Permission, err = models.GetUserRepoPermission(repo, ctx.Doer)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "GetUserRepoPermission", err)
 			return
@@ -307,7 +307,7 @@ func reqOrgOwnership() func(ctx *context.APIContext) {
 			return
 		}
 
-		isOwner, err := models.IsOrganizationOwner(orgID, ctx.User.ID)
+		isOwner, err := models.IsOrganizationOwner(orgID, ctx.Doer.ID)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "IsOrganizationOwner", err)
 			return
@@ -333,8 +333,8 @@ func reqTeamMembership() func(ctx *context.APIContext) {
 			return
 		}
 
-		var orgID = ctx.Org.Team.OrgID
-		isOwner, err := models.IsOrganizationOwner(orgID, ctx.User.ID)
+		orgID := ctx.Org.Team.OrgID
+		isOwner, err := models.IsOrganizationOwner(orgID, ctx.Doer.ID)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "IsOrganizationOwner", err)
 			return
@@ -342,11 +342,11 @@ func reqTeamMembership() func(ctx *context.APIContext) {
 			return
 		}
 
-		if isTeamMember, err := models.IsTeamMember(orgID, ctx.Org.Team.ID, ctx.User.ID); err != nil {
+		if isTeamMember, err := models.IsTeamMember(orgID, ctx.Org.Team.ID, ctx.Doer.ID); err != nil {
 			ctx.Error(http.StatusInternalServerError, "IsTeamMember", err)
 			return
 		} else if !isTeamMember {
-			isOrgMember, err := models.IsOrganizationMember(orgID, ctx.User.ID)
+			isOrgMember, err := models.IsOrganizationMember(orgID, ctx.Doer.ID)
 			if err != nil {
 				ctx.Error(http.StatusInternalServerError, "IsOrganizationMember", err)
 			} else if isOrgMember {
@@ -376,7 +376,7 @@ func reqOrgMembership() func(ctx *context.APIContext) {
 			return
 		}
 
-		if isMember, err := models.IsOrganizationMember(orgID, ctx.User.ID); err != nil {
+		if isMember, err := models.IsOrganizationMember(orgID, ctx.Doer.ID); err != nil {
 			ctx.Error(http.StatusInternalServerError, "IsOrganizationMember", err)
 			return
 		} else if !isMember {
@@ -392,7 +392,7 @@ func reqOrgMembership() func(ctx *context.APIContext) {
 
 func reqGitHook() func(ctx *context.APIContext) {
 	return func(ctx *context.APIContext) {
-		if !ctx.User.CanEditGitHook() {
+		if !ctx.Doer.CanEditGitHook() {
 			ctx.Error(http.StatusForbidden, "", "must be allowed to edit Git hooks")
 			return
 		}
@@ -463,7 +463,7 @@ func mustEnableIssues(ctx *context.APIContext) {
 			if ctx.IsSigned {
 				log.Trace("Permission Denied: User %-v cannot read %-v in Repo %-v\n"+
 					"User in Repo has Permissions: %-+v",
-					ctx.User,
+					ctx.Doer,
 					unit.TypeIssues,
 					ctx.Repo.Repository,
 					ctx.Repo.Permission)
@@ -486,7 +486,7 @@ func mustAllowPulls(ctx *context.APIContext) {
 			if ctx.IsSigned {
 				log.Trace("Permission Denied: User %-v cannot read %-v in Repo %-v\n"+
 					"User in Repo has Permissions: %-+v",
-					ctx.User,
+					ctx.Doer,
 					unit.TypePullRequests,
 					ctx.Repo.Repository,
 					ctx.Repo.Permission)
@@ -510,7 +510,7 @@ func mustEnableIssuesOrPulls(ctx *context.APIContext) {
 			if ctx.IsSigned {
 				log.Trace("Permission Denied: User %-v cannot read %-v and %-v in Repo %-v\n"+
 					"User in Repo has Permissions: %-+v",
-					ctx.User,
+					ctx.Doer,
 					unit.TypeIssues,
 					unit.TypePullRequests,
 					ctx.Repo.Repository,
@@ -545,12 +545,12 @@ func mustNotBeArchived(ctx *context.APIContext) {
 
 // bind binding an obj to a func(ctx *context.APIContext)
 func bind(obj interface{}) http.HandlerFunc {
-	var tp = reflect.TypeOf(obj)
+	tp := reflect.TypeOf(obj)
 	for tp.Kind() == reflect.Ptr {
 		tp = tp.Elem()
 	}
 	return web.Wrap(func(ctx *context.APIContext) {
-		var theObj = reflect.New(tp).Interface() // create a new form obj for every request but not use obj directly
+		theObj := reflect.New(tp).Interface() // create a new form obj for every request but not use obj directly
 		errs := binding.Bind(ctx.Req, theObj)
 		if len(errs) > 0 {
 			ctx.Error(http.StatusUnprocessableEntity, "validationError", fmt.Sprintf("%s: %s", errs[0].FieldNames, errs[0].Error()))
@@ -562,16 +562,16 @@ func bind(obj interface{}) http.HandlerFunc {
 
 // Routes registers all v1 APIs routes to web application.
 func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
-	var m = web.NewRoute()
+	m := web.NewRoute()
 
 	m.Use(sessioner)
 
 	m.Use(securityHeaders())
 	if setting.CORSConfig.Enabled {
 		m.Use(cors.Handler(cors.Options{
-			//Scheme:           setting.CORSConfig.Scheme, // FIXME: the cors middleware needs scheme option
+			// Scheme:           setting.CORSConfig.Scheme, // FIXME: the cors middleware needs scheme option
 			AllowedOrigins: setting.CORSConfig.AllowDomain,
-			//setting.CORSConfig.AllowSubdomain // FIXME: the cors middleware needs allowSubdomain option
+			// setting.CORSConfig.AllowSubdomain // FIXME: the cors middleware needs allowSubdomain option
 			AllowedMethods:   setting.CORSConfig.Methods,
 			AllowCredentials: setting.CORSConfig.AllowCredentials,
 			AllowedHeaders:   []string{"Authorization", "X-CSRFToken", "X-Gitea-OTP"},
@@ -778,10 +778,10 @@ func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
 				m.Combo("/forks").Get(repo.ListForks).
 					Post(reqToken(), reqRepoReader(unit.TypeCode), bind(api.CreateForkOption{}), repo.CreateFork)
 				m.Group("/branches", func() {
-					m.Get("", repo.ListBranches)
-					m.Get("/*", repo.GetBranch)
-					m.Delete("/*", context.ReferencesGitRepo(false), reqRepoWriter(unit.TypeCode), repo.DeleteBranch)
-					m.Post("", reqRepoWriter(unit.TypeCode), bind(api.CreateBranchRepoOption{}), repo.CreateBranch)
+					m.Get("", context.ReferencesGitRepo(false), repo.ListBranches)
+					m.Get("/*", context.ReferencesGitRepo(false), repo.GetBranch)
+					m.Delete("/*", reqRepoWriter(unit.TypeCode), context.ReferencesGitRepo(false), repo.DeleteBranch)
+					m.Post("", reqRepoWriter(unit.TypeCode), context.ReferencesGitRepo(false), bind(api.CreateBranchRepoOption{}), repo.CreateBranch)
 				}, reqRepoReader(unit.TypeCode))
 				m.Group("/branch_protections", func() {
 					m.Get("", repo.ListBranchProtections)
@@ -835,7 +835,8 @@ func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
 					})
 					m.Group("/{index}", func() {
 						m.Combo("").Get(repo.GetIssue).
-							Patch(reqToken(), bind(api.EditIssueOption{}), repo.EditIssue)
+							Patch(reqToken(), bind(api.EditIssueOption{}), repo.EditIssue).
+							Delete(reqToken(), reqAdmin(), repo.DeleteIssue)
 						m.Group("/comments", func() {
 							m.Combo("").Get(repo.ListIssueComments).
 								Post(reqToken(), mustNotBeArchived, bind(api.CreateIssueCommentOption{}), repo.CreateIssueComment)
@@ -957,7 +958,7 @@ func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
 						Post(reqToken(), bind(api.CreateStatusOption{}), repo.NewCommitStatus)
 				}, reqRepoReader(unit.TypeCode))
 				m.Group("/commits", func() {
-					m.Get("", repo.GetAllCommits)
+					m.Get("", context.ReferencesGitRepo(false), repo.GetAllCommits)
 					m.Group("/{ref}", func() {
 						m.Get("/status", repo.GetCombinedCommitStatusByRef)
 						m.Get("/statuses", repo.GetCommitStatusesByRef)
@@ -965,7 +966,7 @@ func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
 				}, reqRepoReader(unit.TypeCode))
 				m.Group("/git", func() {
 					m.Group("/commits", func() {
-						m.Get("/{sha}", repo.GetSingleCommit)
+						m.Get("/{sha}", context.ReferencesGitRepo(false), repo.GetSingleCommit)
 						m.Get("/{sha}.{diffType:diff|patch}", repo.DownloadCommitDiffOrPatch)
 					})
 					m.Get("/refs", repo.GetGitAllRefs)
@@ -975,6 +976,7 @@ func Routes(sessioner func(http.Handler) http.Handler) *web.Route {
 					m.Get("/tags/{sha}", context.RepoRefForAPI, repo.GetAnnotatedTag)
 					m.Get("/notes/{sha}", repo.GetNote)
 				}, reqRepoReader(unit.TypeCode))
+				m.Post("/diffpatch", reqRepoWriter(unit.TypeCode), reqToken(), bind(api.ApplyDiffPatchFileOptions{}), repo.ApplyDiffPatch)
 				m.Group("/contents", func() {
 					m.Get("", repo.GetContentsList)
 					m.Get("/*", repo.GetContents)

@@ -82,7 +82,7 @@ func CreateOrg(ctx *context.APIContext) {
 	ctx.JSON(http.StatusCreated, convert.ToOrganization(org))
 }
 
-//GetAllOrgs API for getting information of all the organizations
+// GetAllOrgs API for getting information of all the organizations
 func GetAllOrgs(ctx *context.APIContext) {
 	// swagger:operation GET /admin/orgs admin adminGetAllOrgs
 	// ---
@@ -107,7 +107,7 @@ func GetAllOrgs(ctx *context.APIContext) {
 	listOptions := utils.GetListOptions(ctx)
 
 	users, maxResults, err := user_model.SearchUsers(&user_model.SearchUserOptions{
-		Actor:       ctx.User,
+		Actor:       ctx.Doer,
 		Type:        user_model.UserTypeOrganization,
 		OrderBy:     db.SearchOrderByAlphabetically,
 		ListOptions: listOptions,

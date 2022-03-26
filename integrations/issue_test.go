@@ -121,7 +121,6 @@ func TestNoLoginViewIssue(t *testing.T) {
 }
 
 func testNewIssue(t *testing.T, session *TestSession, user, repo, title, content string) string {
-
 	req := NewRequest(t, "GET", path.Join(user, repo, "issues", "new"))
 	resp := session.MakeRequest(t, req, http.StatusOK)
 
@@ -133,7 +132,7 @@ func testNewIssue(t *testing.T, session *TestSession, user, repo, title, content
 		"title":   title,
 		"content": content,
 	})
-	resp = session.MakeRequest(t, req, http.StatusFound)
+	resp = session.MakeRequest(t, req, http.StatusSeeOther)
 
 	issueURL := test.RedirectURL(resp)
 	req = NewRequest(t, "GET", issueURL)
@@ -149,7 +148,6 @@ func testNewIssue(t *testing.T, session *TestSession, user, repo, title, content
 }
 
 func testIssueAddComment(t *testing.T, session *TestSession, issueURL, content, status string) int64 {
-
 	req := NewRequest(t, "GET", issueURL)
 	resp := session.MakeRequest(t, req, http.StatusOK)
 
@@ -164,7 +162,7 @@ func testIssueAddComment(t *testing.T, session *TestSession, issueURL, content, 
 		"content": content,
 		"status":  status,
 	})
-	resp = session.MakeRequest(t, req, http.StatusFound)
+	resp = session.MakeRequest(t, req, http.StatusSeeOther)
 
 	req = NewRequest(t, "GET", test.RedirectURL(resp))
 	resp = session.MakeRequest(t, req, http.StatusOK)
@@ -244,7 +242,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: 0,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNone})
+		RefAction:    references.XRefActionNone,
+	})
 
 	// Edit title, neuter ref
 	testIssueChangeInfo(t, "user2", issueRefURL, "title", "Title no ref")
@@ -254,7 +253,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: 0,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNeutered})
+		RefAction:    references.XRefActionNeutered,
+	})
 
 	// Ref from issue content
 	issueRefURL, issueRef = testIssueWithBean(t, "user2", 1, "TitleXRef", fmt.Sprintf("Description ref #%d", issueBase.Index))
@@ -264,7 +264,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: 0,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNone})
+		RefAction:    references.XRefActionNone,
+	})
 
 	// Edit content, neuter ref
 	testIssueChangeInfo(t, "user2", issueRefURL, "content", "Description no ref")
@@ -274,7 +275,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: 0,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNeutered})
+		RefAction:    references.XRefActionNeutered,
+	})
 
 	// Ref from a comment
 	session := loginUser(t, "user2")
@@ -285,7 +287,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: commentID,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNone}
+		RefAction:    references.XRefActionNone,
+	}
 	unittest.AssertExistsAndLoadBean(t, comment)
 
 	// Ref from a different repository
@@ -296,7 +299,8 @@ func TestIssueCrossReference(t *testing.T) {
 		RefIssueID:   issueRef.ID,
 		RefCommentID: 0,
 		RefIsPull:    false,
-		RefAction:    references.XRefActionNone})
+		RefAction:    references.XRefActionNone,
+	})
 }
 
 func testIssueWithBean(t *testing.T, user string, repoID int64, title, content string) (string, *models.Issue) {
@@ -330,16 +334,16 @@ func TestIssueRedirect(t *testing.T) {
 
 	// Test external tracker where style not set (shall default numeric)
 	req := NewRequest(t, "GET", path.Join("org26", "repo_external_tracker", "issues", "1"))
-	resp := session.MakeRequest(t, req, http.StatusFound)
+	resp := session.MakeRequest(t, req, http.StatusSeeOther)
 	assert.Equal(t, "https://tracker.com/org26/repo_external_tracker/issues/1", test.RedirectURL(resp))
 
 	// Test external tracker with numeric style
 	req = NewRequest(t, "GET", path.Join("org26", "repo_external_tracker_numeric", "issues", "1"))
-	resp = session.MakeRequest(t, req, http.StatusFound)
+	resp = session.MakeRequest(t, req, http.StatusSeeOther)
 	assert.Equal(t, "https://tracker.com/org26/repo_external_tracker_numeric/issues/1", test.RedirectURL(resp))
 
 	// Test external tracker with alphanumeric style (for a pull request)
 	req = NewRequest(t, "GET", path.Join("org26", "repo_external_tracker_alpha", "issues", "1"))
-	resp = session.MakeRequest(t, req, http.StatusFound)
+	resp = session.MakeRequest(t, req, http.StatusSeeOther)
 	assert.Equal(t, "/"+path.Join("org26", "repo_external_tracker_alpha", "pulls", "1"), test.RedirectURL(resp))
 }

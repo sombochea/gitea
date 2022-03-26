@@ -1474,7 +1474,7 @@
           "204": {
             "description": "user is a member"
           },
-          "302": {
+          "303": {
             "description": "redirection to /orgs/{org}/public_members/{username}"
           },
           "404": {
@@ -3383,6 +3383,50 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/diffpatch": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Apply diff patch to repository",
+        "operationId": "repoApplyDiffPatch",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdateFileOptions"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/FileResponse"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/editorconfig/{filepath}": {
       "get": {
         "produces": [
@@ -4916,6 +4960,48 @@
         "responses": {
           "200": {
             "$ref": "#/responses/Issue"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "issue"
+        ],
+        "summary": "Delete an issue",
+        "operationId": "issueDelete",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of issue to delete",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -13517,7 +13603,8 @@
             "slack",
             "telegram",
             "feishu",
-            "wechatwork"
+            "wechatwork",
+            "packagist"
           ],
           "x-go-name": "Type"
         }
@@ -13893,7 +13980,7 @@
       ],
       "properties": {
         "auto_init": {
-          "description": "Whether the repository should be auto-intialized?",
+          "description": "Whether the repository should be auto-initialized?",
           "type": "boolean",
           "x-go-name": "AutoInit"
         },
@@ -14721,6 +14808,11 @@
           "description": "either `true` to allow rebase with explicit merge commits (--no-ff), or `false` to prevent rebase with explicit merge commits. `has_pull_requests` must be `true`.",
           "type": "boolean",
           "x-go-name": "AllowRebaseMerge"
+        },
+        "allow_rebase_update": {
+          "description": "either `true` to allow updating pull request branch by rebase, or `false` to prevent it. `has_pull_requests` must be `true`.",
+          "type": "boolean",
+          "x-go-name": "AllowRebaseUpdate"
         },
         "allow_squash_merge": {
           "description": "either `true` to allow squash-merging pull requests, or `false` to prevent squash-merging. `has_pull_requests` must be `true`.",
@@ -16400,7 +16492,7 @@
       "x-go-package": "code.gitea.io/gitea/modules/structs"
     },
     "OrganizationPermissions": {
-      "description": "OrganizationPermissions list differents users permissions on an organization",
+      "description": "OrganizationPermissions list different users permissions on an organization",
       "type": "object",
       "properties": {
         "can_create_repository": {
@@ -17187,6 +17279,14 @@
         "internal_tracker": {
           "$ref": "#/definitions/InternalTracker"
         },
+        "language": {
+          "type": "string",
+          "x-go-name": "Language"
+        },
+        "languages_url": {
+          "type": "string",
+          "x-go-name": "LanguagesURL"
+        },
         "mirror": {
           "type": "boolean",
           "x-go-name": "Mirror"
@@ -17194,6 +17294,11 @@
         "mirror_interval": {
           "type": "string",
           "x-go-name": "MirrorInterval"
+        },
+        "mirror_updated": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "MirrorUpdated"
         },
         "name": {
           "type": "string",

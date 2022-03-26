@@ -9,9 +9,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"html"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -23,6 +25,7 @@ import (
 	user_model "code.gitea.io/gitea/models/user"
 	"code.gitea.io/gitea/modules/base"
 	mc "code.gitea.io/gitea/modules/cache"
+	"code.gitea.io/gitea/modules/git"
 	"code.gitea.io/gitea/modules/json"
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/setting"
@@ -35,7 +38,6 @@ import (
 	"gitea.com/go-chi/session"
 	chi "github.com/go-chi/chi/v5"
 	"github.com/unknwon/com"
-	"github.com/unknwon/i18n"
 	"github.com/unrolled/render"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -61,7 +63,7 @@ type Context struct {
 
 	Link        string // current request URL
 	EscapedLink string
-	User        *user_model.User
+	Doer        *user_model.User
 	IsSigned    bool
 	IsBasicAuth bool
 
@@ -86,7 +88,7 @@ func (ctx *Context) GetData() map[string]interface{} {
 
 // IsUserSiteAdmin returns true if current user is a site admin
 func (ctx *Context) IsUserSiteAdmin() bool {
-	return ctx.IsSigned && ctx.User.IsAdmin
+	return ctx.IsSigned && ctx.Doer.IsAdmin
 }
 
 // IsUserRepoOwner returns true if current user owns current repo
@@ -137,7 +139,7 @@ func RedirectToUser(ctx *Context, userName string, redirectUserID int64) {
 	if ctx.Req.URL.RawQuery != "" {
 		redirectPath += "?" + ctx.Req.URL.RawQuery
 	}
-	ctx.Redirect(path.Join(setting.AppSubURL, redirectPath))
+	ctx.Redirect(path.Join(setting.AppSubURL, redirectPath), http.StatusTemporaryRedirect)
 }
 
 // HasAPIError returns true if error occurs in form validation.
@@ -179,6 +181,12 @@ func (ctx *Context) RedirectToFirst(location ...string) {
 			continue
 		}
 
+		// Unfortunately browsers consider a redirect Location with preceding "//" and "/\" as meaning redirect to "http(s)://REST_OF_PATH"
+		// Therefore we should ignore these redirect locations to prevent open redirects
+		if len(loc) > 1 && loc[0] == '/' && (loc[1] == '/' || loc[1] == '\\') {
+			continue
+		}
+
 		u, err := url.Parse(loc)
 		if err != nil || ((u.Scheme != "" || u.Host != "") && !strings.HasPrefix(strings.ToLower(loc), strings.ToLower(setting.AppURL))) {
 			continue
@@ -195,7 +203,10 @@ func (ctx *Context) RedirectToFirst(location ...string) {
 func (ctx *Context) HTML(status int, name base.TplName) {
 	log.Debug("Template: %s", name)
 	tmplStartTime := time.Now()
-	ctx.Data["TmplLoadTimes"] = func() string {
+	if !setting.IsProd {
+		ctx.Data["TemplateName"] = name
+	}
+	ctx.Data["TemplateLoadTimes"] = func() string {
 		return strconv.FormatInt(time.Since(tmplStartTime).Nanoseconds()/1e6, 10) + "ms"
 	}
 	if err := ctx.Render.HTML(ctx.Resp, status, string(name), ctx.Data); err != nil {
@@ -210,7 +221,7 @@ func (ctx *Context) HTML(status int, name base.TplName) {
 // RenderToString renders the template content to a string
 func (ctx *Context) RenderToString(name base.TplName, data map[string]interface{}) (string, error) {
 	var buf strings.Builder
-	err := ctx.Render.HTML(&buf, 200, string(name), data)
+	err := ctx.Render.HTML(&buf, http.StatusOK, string(name), data)
 	return buf.String(), err
 }
 
@@ -231,7 +242,7 @@ func (ctx *Context) NotFound(logMsg string, logErr error) {
 
 func (ctx *Context) notFoundInternal(logMsg string, logErr error) {
 	if logErr != nil {
-		log.ErrorWithSkip(2, "%s: %v", logMsg, logErr)
+		log.Log(2, log.DEBUG, "%s: %v", logMsg, logErr)
 		if !setting.IsProd {
 			ctx.Data["ErrorMsg"] = logErr
 		}
@@ -247,7 +258,7 @@ func (ctx *Context) notFoundInternal(logMsg string, logErr error) {
 	}
 
 	if !showHTML {
-		ctx.PlainText(http.StatusNotFound, "Not found.\n")
+		ctx.plainTextInternal(3, http.StatusNotFound, []byte("Not found.\n"))
 		return
 	}
 
@@ -264,6 +275,12 @@ func (ctx *Context) ServerError(logMsg string, logErr error) {
 func (ctx *Context) serverErrorInternal(logMsg string, logErr error) {
 	if logErr != nil {
 		log.ErrorWithSkip(2, "%s: %v", logMsg, logErr)
+		if _, ok := logErr.(*net.OpError); ok || errors.Is(logErr, &net.OpError{}) {
+			// This is an error within the underlying connection
+			// and further rendering will not work so just return
+			return
+		}
+
 		if !setting.IsProd {
 			ctx.Data["ErrorMsg"] = logErr
 		}
@@ -285,20 +302,27 @@ func (ctx *Context) NotFoundOrServerError(logMsg string, errCheck func(error) bo
 }
 
 // PlainTextBytes renders bytes as plain text
-func (ctx *Context) PlainTextBytes(status int, bs []byte) {
-	if (status/100 == 4) || (status/100 == 5) {
-		log.Error("PlainTextBytes: %s", string(bs))
+func (ctx *Context) plainTextInternal(skip, status int, bs []byte) {
+	statusPrefix := status / 100
+	if statusPrefix == 4 || statusPrefix == 5 {
+		log.Log(skip, log.TRACE, "plainTextInternal (status=%d): %s", status, string(bs))
 	}
 	ctx.Resp.WriteHeader(status)
 	ctx.Resp.Header().Set("Content-Type", "text/plain;charset=utf-8")
+	ctx.Resp.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, err := ctx.Resp.Write(bs); err != nil {
-		log.Error("Write bytes failed: %v", err)
+		log.ErrorWithSkip(skip, "plainTextInternal (status=%d): write bytes failed: %v", status, err)
 	}
+}
+
+// PlainTextBytes renders bytes as plain text
+func (ctx *Context) PlainTextBytes(status int, bs []byte) {
+	ctx.plainTextInternal(2, status, bs)
 }
 
 // PlainText renders content as plain text
 func (ctx *Context) PlainText(status int, text string) {
-	ctx.PlainTextBytes(status, []byte(text))
+	ctx.plainTextInternal(2, status, []byte(text))
 }
 
 // RespHeader returns the response header
@@ -361,7 +385,7 @@ func (ctx *Context) ServeStream(rd io.Reader, name string) {
 
 // Error returned an error to web browser
 func (ctx *Context) Error(status int, contents ...string) {
-	var v = http.StatusText(status)
+	v := http.StatusText(status)
 	if len(contents) > 0 {
 		v = contents[0]
 	}
@@ -379,7 +403,7 @@ func (ctx *Context) JSON(status int, content interface{}) {
 
 // Redirect redirects the request
 func (ctx *Context) Redirect(location string, status ...int) {
-	code := http.StatusFound
+	code := http.StatusSeeOther
 	if len(status) == 1 {
 		code = status[0]
 	}
@@ -529,6 +553,10 @@ func (ctx *Context) Err() error {
 
 // Value is part of the interface for context.Context and we pass this to the request context
 func (ctx *Context) Value(key interface{}) interface{} {
+	if key == git.RepositoryContextKey && ctx.Repo != nil {
+		return ctx.Repo.GitRepo
+	}
+
 	return ctx.Req.Context().Value(key)
 }
 
@@ -552,10 +580,10 @@ func GetContext(req *http.Request) *Context {
 // GetContextUser returns context user
 func GetContextUser(req *http.Request) *user_model.User {
 	if apiContext, ok := req.Context().Value(apiContextKey).(*APIContext); ok {
-		return apiContext.User
+		return apiContext.Doer
 	}
 	if ctx, ok := req.Context().Value(contextKey).(*Context); ok {
-		return ctx.User
+		return ctx.Doer
 	}
 	return nil
 }
@@ -577,18 +605,18 @@ func getCsrfOpts() CsrfOptions {
 // Auth converts auth.Auth as a middleware
 func Auth(authMethod auth.Method) func(*Context) {
 	return func(ctx *Context) {
-		ctx.User = authMethod.Verify(ctx.Req, ctx.Resp, ctx, ctx.Session)
-		if ctx.User != nil {
-			if ctx.Locale.Language() != ctx.User.Language {
+		ctx.Doer = authMethod.Verify(ctx.Req, ctx.Resp, ctx, ctx.Session)
+		if ctx.Doer != nil {
+			if ctx.Locale.Language() != ctx.Doer.Language {
 				ctx.Locale = middleware.Locale(ctx.Resp, ctx.Req)
 			}
 			ctx.IsBasicAuth = ctx.Data["AuthedMethod"].(string) == auth.BasicMethodName
 			ctx.IsSigned = true
 			ctx.Data["IsSigned"] = ctx.IsSigned
-			ctx.Data["SignedUser"] = ctx.User
-			ctx.Data["SignedUserID"] = ctx.User.ID
-			ctx.Data["SignedUserName"] = ctx.User.Name
-			ctx.Data["IsAdmin"] = ctx.User.IsAdmin
+			ctx.Data["SignedUser"] = ctx.Doer
+			ctx.Data["SignedUserID"] = ctx.Doer.ID
+			ctx.Data["SignedUserName"] = ctx.Doer.Name
+			ctx.Data["IsAdmin"] = ctx.Doer.IsAdmin
 		} else {
 			ctx.Data["SignedUserID"] = int64(0)
 			ctx.Data["SignedUserName"] = ""
@@ -601,16 +629,16 @@ func Auth(authMethod auth.Method) func(*Context) {
 
 // Contexter initializes a classic context for a request.
 func Contexter() func(next http.Handler) http.Handler {
-	var rnd = templates.HTMLRenderer()
-	var csrfOpts = getCsrfOpts()
+	rnd := templates.HTMLRenderer()
+	csrfOpts := getCsrfOpts()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
-			var locale = middleware.Locale(resp, req)
-			var startTime = time.Now()
-			var link = setting.AppSubURL + strings.TrimSuffix(req.URL.EscapedPath(), "/")
+			locale := middleware.Locale(resp, req)
+			startTime := time.Now()
+			link := setting.AppSubURL + strings.TrimSuffix(req.URL.EscapedPath(), "/")
 
-			var ctx = Context{
+			ctx := Context{
 				Resp:    NewResponse(resp),
 				Cache:   mc.GetCache(),
 				Locale:  locale,
@@ -631,6 +659,7 @@ func Contexter() func(next http.Handler) http.Handler {
 			// PageData is passed by reference, and it will be rendered to `window.config.pageData` in `head.tmpl` for JavaScript modules
 			ctx.PageData = map[string]interface{}{}
 			ctx.Data["PageData"] = ctx.PageData
+			ctx.Data["Context"] = &ctx
 
 			ctx.Req = WithContext(req, &ctx)
 			ctx.csrf = Csrfer(csrfOpts, &ctx)
@@ -717,15 +746,7 @@ func Contexter() func(next http.Handler) http.Handler {
 			ctx.Data["UnitProjectsGlobalDisabled"] = unit.TypeProjects.UnitGlobalDisabled()
 
 			ctx.Data["i18n"] = locale
-			ctx.Data["Tr"] = i18n.Tr
-			ctx.Data["Lang"] = locale.Language()
 			ctx.Data["AllLangs"] = translation.AllLangs()
-			for _, lang := range translation.AllLangs() {
-				if lang.Lang == locale.Language() {
-					ctx.Data["LangName"] = lang.Name
-					break
-				}
-			}
 
 			next.ServeHTTP(ctx.Resp, ctx.Req)
 
