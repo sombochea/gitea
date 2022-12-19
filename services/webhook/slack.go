@@ -1,6 +1,5 @@
 // Copyright 2014 The Gogs Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package webhook
 
@@ -179,10 +178,10 @@ func (s *SlackPayload) Push(p *api.PushPayload) (api.Payloader, error) {
 		commitString string
 	)
 
-	if len(p.Commits) == 1 {
+	if p.TotalCommits == 1 {
 		commitDesc = "1 new commit"
 	} else {
-		commitDesc = fmt.Sprintf("%d new commits", len(p.Commits))
+		commitDesc = fmt.Sprintf("%d new commits", p.TotalCommits)
 	}
 	if len(p.CompareURL) > 0 {
 		commitString = SlackLinkFormatter(p.CompareURL, commitDesc)

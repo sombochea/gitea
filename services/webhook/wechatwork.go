@@ -1,6 +1,5 @@
 // Copyright 2021 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package webhook
 
@@ -93,7 +92,7 @@ func (f *WechatworkPayload) Push(p *api.PushPayload) (api.Payloader, error) {
 	for i, commit := range p.Commits {
 		var authorName string
 		if commit.Author != nil {
-			authorName = "Author：" + commit.Author.Name
+			authorName = "Author: " + commit.Author.Name
 		}
 
 		message := strings.ReplaceAll(commit.Message, "\n\n", "\r\n")
@@ -139,7 +138,7 @@ func (f *WechatworkPayload) PullRequest(p *api.PullRequestPayload) (api.Payloade
 func (f *WechatworkPayload) Review(p *api.PullRequestPayload, event webhook_model.HookEventType) (api.Payloader, error) {
 	var text, title string
 	switch p.Action {
-	case api.HookIssueSynchronized:
+	case api.HookIssueReviewed:
 		action, err := parseHookPullRequestEventType(event)
 		if err != nil {
 			return nil, err

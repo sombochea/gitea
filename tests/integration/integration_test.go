@@ -1,6 +1,5 @@
 // Copyright 2017 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package integration
 
@@ -18,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +33,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
+	"github.com/xeipuuv/gojsonschema"
 )
 
 var c *web.Route
@@ -263,19 +264,19 @@ var tokenCounter int64
 
 func getTokenForLoggedInUser(t testing.TB, session *TestSession) string {
 	t.Helper()
-	tokenCounter++
 	req := NewRequest(t, "GET", "/user/settings/applications")
 	resp := session.MakeRequest(t, req, http.StatusOK)
 	doc := NewHTMLParser(t, resp.Body)
 	req = NewRequestWithValues(t, "POST", "/user/settings/applications", map[string]string{
 		"_csrf": doc.GetCSRF(),
-		"name":  fmt.Sprintf("api-testing-token-%d", tokenCounter),
+		"name":  fmt.Sprintf("api-testing-token-%d", atomic.AddInt64(&tokenCounter, 1)),
 	})
 	session.MakeRequest(t, req, http.StatusSeeOther)
 	req = NewRequest(t, "GET", "/user/settings/applications")
 	resp = session.MakeRequest(t, req, http.StatusOK)
 	htmlDoc := NewHTMLParser(t, resp.Body)
 	token := htmlDoc.doc.Find(".ui.info p").Text()
+	assert.NotEmpty(t, token)
 	return token
 }
 
@@ -396,6 +397,25 @@ func DecodeJSON(t testing.TB, resp *httptest.ResponseRecorder, v interface{}) {
 
 	decoder := json.NewDecoder(resp.Body)
 	assert.NoError(t, decoder.Decode(v))
+}
+
+func VerifyJSONSchema(t testing.TB, resp *httptest.ResponseRecorder, schemaFile string) {
+	t.Helper()
+
+	schemaFilePath := filepath.Join(filepath.Dir(setting.AppPath), "tests", "integration", "schemas", schemaFile)
+	_, schemaFileErr := os.Stat(schemaFilePath)
+	assert.Nil(t, schemaFileErr)
+
+	schema, schemaFileReadErr := os.ReadFile(schemaFilePath)
+	assert.Nil(t, schemaFileReadErr)
+	assert.True(t, len(schema) > 0)
+
+	nodeinfoSchema := gojsonschema.NewStringLoader(string(schema))
+	nodeinfoString := gojsonschema.NewStringLoader(resp.Body.String())
+	result, schemaValidationErr := gojsonschema.Validate(nodeinfoSchema, nodeinfoString)
+	assert.Nil(t, schemaValidationErr)
+	assert.Empty(t, result.Errors())
+	assert.True(t, result.Valid())
 }
 
 func GetCSRF(t testing.TB, session *TestSession, urlStr string) string {

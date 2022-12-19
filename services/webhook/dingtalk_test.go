@@ -1,6 +1,5 @@
 // Copyright 2019 The Gitea Authors. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
+// SPDX-License-Identifier: MIT
 
 package webhook
 
@@ -82,7 +81,7 @@ func TestDingTalkPayload(t *testing.T) {
 
 		assert.Equal(t, "[2020558](http://localhost:3000/test/repo/commit/2020558fe2e34debb818a514715839cabd25e778) commit message - user1\r\n[2020558](http://localhost:3000/test/repo/commit/2020558fe2e34debb818a514715839cabd25e778) commit message - user1", pl.(*DingtalkPayload).ActionCard.Text)
 		assert.Equal(t, "[test/repo:test] 2 new commits", pl.(*DingtalkPayload).ActionCard.Title)
-		assert.Equal(t, "view commit 2020558...2020558", pl.(*DingtalkPayload).ActionCard.SingleTitle)
+		assert.Equal(t, "view commits", pl.(*DingtalkPayload).ActionCard.SingleTitle)
 		assert.Equal(t, "http://localhost:3000/test/repo/src/test", parseRealSingleURL(pl.(*DingtalkPayload).ActionCard.SingleURL))
 	})
 
